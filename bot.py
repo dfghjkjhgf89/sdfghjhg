@@ -38,7 +38,7 @@ from config import (
     TBANK_SECRET_KEY
 )
 from database import init_db, get_db
-from models import User, Subscription, Whitelist, StopCommand, Payment, PaymentStatus, PaymentMethod
+from models import User, Subscription, Whitelist, StopCommand, Payment, PaymentStatus, PaymentMethod, TariffPlan, SubscriptionType
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -274,7 +274,6 @@ async def handle_email(message: types.Message, state: FSMContext):
 
             new_user = User(
                 telegram_id=new_telegram_id,
-                username=new_username,
                 telegram_username=new_username,
                 email=email
             )
@@ -460,32 +459,38 @@ async def handle_process_payment(callback: types.CallbackQuery, *, user: User):
         pay_url, payment_id = await tbank_create_payment(int(amount), order_id, description, user.email)
         now = datetime.datetime.now(datetime.timezone.utc)
         with get_db() as db:
+            # Получаем базовый тариф
+            basic_tariff = db.query(TariffPlan).filter(TariffPlan.type == SubscriptionType.BASIC).first()
+            if not basic_tariff:
+                raise Exception("Базовый тариф не найден")
+
             # Деактивируем все предыдущие подписки пользователя
             db.query(Subscription).filter(
                 Subscription.user_id == user.id,
                 Subscription.is_active == True
             ).update({
                 'is_active': False,
-                'auto_payment': False,
+                'auto_renewal': False,
                 'rebill_id': None
             })
             
             # Создаем новую подписку
             new_sub = Subscription(
                 user_id=user.id,
+                tariff_id=basic_tariff.id,  # Добавляем tariff_id
                 start_date=now,
-                end_date=now + SUBSCRIPTION_DURATION,  # 10 минут в тестовом режиме
+                end_date=now + SUBSCRIPTION_DURATION,
                 payment_amount=amount,
                 is_active=False
             )
             db.add(new_sub)
-            db.flush()  # Получаем id подписки
+            db.flush()
 
             # Создаем запись о платеже
             new_payment = Payment(
                 user_id=user.id,
                 subscription_id=new_sub.id,
-                payment_id=payment_id,
+                external_id=payment_id,  # Исправляем payment_id на external_id
                 amount=amount,
                 currency='RUB',
                 status=PaymentStatus.PENDING,
@@ -524,22 +529,23 @@ async def handle_check_payment(callback: types.CallbackQuery, *, user: User):
         await callback.answer("❌ Некорректный платеж. Попробуйте начать оплату заново.", show_alert=True)
         return
 
-    # Получаем информацию о платеже и карте
+    # Получаем информацию о платеже
     payment_info = await tbank_get_payment_info(payment_id)
     logger.info(f"Payment info received: {payment_info}")
     
     if not payment_info or not payment_info.get("Success"):
-        await callback.answer("⏳ Платеж не найден или не оплачен. Попробуйте через минуту.", show_alert=True)
+        await callback.answer("❌ Ошибка при проверке платежа. Попробуйте позже.", show_alert=True)
         return
 
-    if payment_info.get("Status") == "CONFIRMED":
+    status = payment_info.get("Status", "")
+    
+    if status == "CONFIRMED":
         now = datetime.datetime.now(datetime.timezone.utc)
         logger.info(f"Payment confirmed at {now}")
         
         with get_db() as db:
-            # Находим подписку по payment_id
             payment = db.query(Payment).filter(
-                Payment.payment_id == payment_id,
+                Payment.external_id == payment_id,
                 Payment.user_id == user.id
             ).first()
             
@@ -557,40 +563,70 @@ async def handle_check_payment(callback: types.CallbackQuery, *, user: User):
                 logger.info(f"Found subscription {sub.id}, updating...")
                 sub.is_active = True
                 sub.end_date = now + SUBSCRIPTION_DURATION
-                sub.auto_payment = True
+                sub.auto_renewal = True
                 sub.rebill_id = payment_info.get("RebillId")
                 sub.last_payment_date = now
                 sub.next_payment_date = now + SUBSCRIPTION_DURATION
                 sub.payment_amount = payment_info.get("Amount", 1500) / 100
                 sub.failed_payments = 0
                 
-                # Обновляем статус платежа
                 payment.status = PaymentStatus.COMPLETED
                 payment.completed_at = now
                 
                 db.commit()
                 logger.info(f"Subscription {sub.id} updated successfully. End date: {sub.end_date}")
 
-        # Отправляем сообщение об успешной оплате
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Перейти в канал", url="https://t.me/+vy7Idslu1FQ4MWQy")],
-                [InlineKeyboardButton(text="❌ Отключить автоплатеж", callback_data="disable_autopayment")]
-            ]
-        )
-        
-        end_time = (now + SUBSCRIPTION_DURATION).strftime("%H:%M:%S UTC")
-        
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Перейти в канал", url="https://t.me/+vy7Idslu1FQ4MWQy")],
+                        [InlineKeyboardButton(text="❌ Отключить автоплатеж", callback_data="disable_autopayment")]
+                    ]
+                )
+                
+                end_time = (now + SUBSCRIPTION_DURATION).strftime("%H:%M:%S UTC")
+                
+                await callback.message.edit_text(
+                    "✅ Оплата успешно подтверждена!\n\n"
+                    f"⏳ Доступ предоставлен на 10 минут (до {end_time})\n\n"
+                    "🔄 Автоплатеж включен. После окончания доступа мы автоматически продлим его еще на 10 минут.\n"
+                    "Вы всегда можете отключить автопродление в меню «Моя подписка».\n\n"
+                    "📱 Ссылка на канал уже доступна по кнопке ниже:",
+                    reply_markup=keyboard
+                )
+    elif status == "REJECTED" or status == "DEADLINE_EXPIRED" or status == "CANCELED":
+        # Платеж отклонен или отменен
+        error_message = payment_info.get("Message", "Неизвестная ошибка")
         await callback.message.edit_text(
-            "✅ Оплата подтверждена!\n\n"
-            f"⏳ Доступ предоставлен на 10 минут (до {end_time})\n\n"
-            "🔄 Автоплатеж включен. После окончания доступа мы автоматически продлим его еще на 10 минут.\n"
-            "Вы всегда можете отключить автопродление в меню «Моя подписка».\n\n"
-            "📱 Ссылка на канал уже доступна по кнопке ниже:",
-            reply_markup=keyboard
+            f"❌ Оплата не прошла\n\n"
+            f"Причина: {error_message}\n\n"
+            "Вы можете попробовать оплатить снова:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 Попробовать снова", callback_data="process_payment")],
+                    [InlineKeyboardButton(text="« Назад", callback_data="back")]
+                ]
+            )
+        )
+    elif status == "NEW" or status == "AUTHORIZED" or status == "PENDING":
+        # Платеж в процессе
+        await callback.answer(
+            "⏳ Платеж обрабатывается, пожалуйста, подождите...\n"
+            "Нажмите кнопку проверки через 30 секунд.",
+            show_alert=True
         )
     else:
-        await callback.answer("⏳ Платеж не подтвержден. Попробуйте через минуту.", show_alert=True)
+        # Неизвестный статус
+        await callback.message.edit_text(
+            "❓ Неизвестный статус платежа\n\n"
+            "Пожалуйста, попробуйте оплатить снова или обратитесь в поддержку:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="💳 Попробовать снова", callback_data="process_payment")],
+                    [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")],
+                    [InlineKeyboardButton(text="« Назад", callback_data="back")]
+                ]
+            )
+        )
 
 # Добавляем обработчик для отключения автоплатежа
 @dp.callback_query(F.data == "disable_autopayment")
@@ -602,8 +638,8 @@ async def handle_disable_autopayment(callback: types.CallbackQuery, *, user: Use
             Subscription.is_active == True
         ).first()
         
-        if sub and sub.auto_payment:
-            sub.auto_payment = False
+        if sub and sub.auto_renewal:
+            sub.auto_renewal = False
             sub.rebill_id = None
             db.commit()
             await callback.message.edit_text(
@@ -628,7 +664,7 @@ async def handle_enable_autopayment(callback: types.CallbackQuery, *, user: User
             Subscription.is_active == True
         ).first()
         
-        if sub and not sub.auto_payment:
+        if sub and not sub.auto_renewal:
             # Здесь нужно создать новый платеж для получения rebill_id
             await callback.message.edit_text(
                 "Для включения автоплатежа необходимо совершить новый платеж.\n"
@@ -731,58 +767,112 @@ async def tbank_get_payment_info(payment_id: str) -> dict:
             except Exception:
                 return None
 
+async def notify_upcoming_payment(subscription: Subscription):
+    """Отправляет уведомление о предстоящем списании."""
+    try:
+        message = (
+            "ℹ️ Уведомление о предстоящем списании\n\n"
+            f"Через 2 минуты будет произведено автоматическое продление подписки.\n"
+            f"Сумма к списанию: {subscription.payment_amount}₽\n\n"
+            "Чтобы отключить автопродление, используйте команду /stop"
+        )
+        await bot.send_message(subscription.user.telegram_id, message)
+    except Exception as e:
+        logger.error(f"Ошибка при отправке уведомления о предстоящем списании: {e}")
+
 # Функция для проверки и обработки автоплатежей
 async def process_auto_payments():
     """Обработка автоматических платежей для активных подписок."""
     logger.info("Начало обработки автоматических платежей")
     
     now = datetime.datetime.now(datetime.timezone.utc)
+    notification_threshold = datetime.timedelta(minutes=2)  # За 2 минуты до списания
     
     with get_db() as db:
-        # Получаем все активные подписки с включенным автоплатежом и rebill_id
+        # Получаем подписки для уведомления
+        subscriptions_to_notify = db.query(Subscription).filter(
+            and_(
+                Subscription.auto_renewal == True,
+                Subscription.is_active == True,
+                Subscription.next_payment_date - notification_threshold <= now,
+                Subscription.next_payment_date > now,
+                Subscription.notification_sent == False,  # Новое поле
+                Subscription.rebill_id.isnot(None)
+            )
+        ).all()
+
+        # Отправляем уведомления
+        for subscription in subscriptions_to_notify:
+            await notify_upcoming_payment(subscription)
+            subscription.notification_sent = True
+            db.commit()
+
+        # Получаем подписки для автоплатежа
         subscriptions = db.query(Subscription).filter(
             and_(
-                Subscription.auto_payment == True,
+                Subscription.auto_renewal == True,
                 Subscription.is_active == True,
                 Subscription.next_payment_date <= now,
-                Subscription.rebill_id.isnot(None)  # Только подписки с rebill_id
+                Subscription.rebill_id.isnot(None)
             )
         ).all()
         
         for subscription in subscriptions:
             try:
                 # Создаем платеж
-                payment = await tbank_create_payment(
+                order_id = f"auto_{subscription.user.telegram_id}_{int(now.timestamp())}"
+                payment = await tbank_create_rebill_payment(
+                    rebill_id=subscription.rebill_id,
                     amount=subscription.payment_amount,
-                    description=f"Автоплатеж за подписку {subscription.id}",
-                    rebill_id=subscription.rebill_id
+                    order_id=order_id,
+                    description=f"Автоплатеж за подписку {subscription.id}"
                 )
                 
-                if payment and payment.status == "success":
+                if payment and await tbank_check_payment(payment.get('PaymentId')):
                     # Обновляем даты подписки
                     subscription.end_date = subscription.end_date + SUBSCRIPTION_DURATION
                     subscription.last_payment_date = now
-                    subscription.next_payment_date = subscription.end_date - datetime.timedelta(days=1)
+                    subscription.next_payment_date = subscription.end_date - datetime.timedelta(minutes=2)
                     subscription.failed_payments = 0
+                    subscription.notification_sent = False  # Сбрасываем флаг уведомления
+                    
+                    # Создаем запись о платеже
+                    new_payment = Payment(
+                        user_id=subscription.user_id,
+                        subscription_id=subscription.id,
+                        external_id=payment.get('PaymentId'),  # Исправляем payment_id на external_id
+                        amount=subscription.payment_amount,
+                        currency='RUB',
+                        status=PaymentStatus.COMPLETED,
+                        payment_method=PaymentMethod.CARD,
+                        completed_at=now
+                    )
+                    db.add(new_payment)
                     
                     await notify_user(
                         subscription.user.telegram_id,
-                        "✅ Автоплатеж успешно выполнен. Ваша подписка продлена."
+                        f"✅ Автоплатеж успешно выполнен\n"
+                        f"Сумма: {subscription.payment_amount}₽\n"
+                        f"Подписка продлена до: {subscription.end_date.strftime('%d.%m.%Y %H:%M')} UTC"
                     )
                 else:
                     subscription.failed_payments += 1
                     
                     if subscription.failed_payments >= 3:
-                        subscription.auto_payment = False
+                        subscription.auto_renewal = False
                         subscription.rebill_id = None
                         await notify_user(
                             subscription.user.telegram_id,
-                            "❌ Автоплатеж отключен из-за повторных неудач. Пожалуйста, обновите способ оплаты."
+                            "❌ Автоплатеж отключен из-за повторных неудач.\n"
+                            "Для возобновления подписки, пожалуйста, оплатите её заново."
                         )
                     else:
+                        retry_in = 2 ** subscription.failed_payments  # Экспоненциальная задержка
+                        subscription.next_payment_date = now + datetime.timedelta(minutes=retry_in)
                         await notify_user(
                             subscription.user.telegram_id,
-                            f"⚠️ Автоплатеж не удался (попытка {subscription.failed_payments}/3). Мы попробуем снова позже."
+                            f"⚠️ Автоплатеж не удался (попытка {subscription.failed_payments}/3).\n"
+                            f"Следующая попытка через {retry_in} минут."
                         )
                 
                 db.commit()
@@ -839,6 +929,23 @@ async def main():
     logger.info("bot.py main() called!")
     logger.info("Initializing database...")
     init_db()
+    
+    # Создаем базовый тариф, если его нет
+    with get_db() as db:
+        basic_tariff = db.query(TariffPlan).filter(TariffPlan.type == SubscriptionType.BASIC).first()
+        if not basic_tariff:
+            basic_tariff = TariffPlan(
+                type=SubscriptionType.BASIC,
+                name="СИСТЕМНИК УБТ (Карта РФ)",
+                description="Приватный чат СИСТЕМНИК УБТ ПРИВАТ",
+                price=1500.0,
+                duration_days=30,
+                is_active=True
+            )
+            db.add(basic_tariff)
+            db.commit()
+            logger.info("Basic tariff plan created")
+    
     logger.info("Database initialized.")
 
     try:

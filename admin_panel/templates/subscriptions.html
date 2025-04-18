@@ -1,76 +1,103 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
 {% block title %}Отчет по подпискам{% endblock %}
 
 {% block content %}
-<h2><i class="bi bi-calendar-check"></i> Отчет по подпискам (за сегодня)</h2>
+<div class="container mt-4">
+    <h2>📊 Отчет по подпискам (за сегодня)</h2>
 
-<div class="row">
-    <div class="col-md-6">
-        <h4><i class="bi bi-currency-ruble"></i> Оплачено сегодня</h4>
-        {% if paid_today %}
-        <div class="table-responsive">
-            <table class="table table-sm table-striped">
-                <thead>
-                    <tr>
-                        <th>ID Подписки</th>
-                        <th>Пользователь (TG ID)</th>
-                        <th>Время оплаты</th>
-                        <th>Сумма</th>
-                        <th>ID Платежа</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for sub in paid_today %}
-                    <tr>
-                        <td>{{ sub.id }}</td>
-                        <td>
-                            {{ sub.user.telegram_username or '-' }}
-                            (<code>{{ sub.user.telegram_id }}</code>)
-                        </td>
-                        <td>{{ sub.start_date.strftime('%H:%M:%S') if sub.start_date else '-' }}</td>
-                        <td>{{ sub.payment_amount or '-' }} ₽</td>
-                        <td><code>{{ sub.payment_id or '-' }}</code></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+    <div class="row mt-4">
+        <!-- Оплаты за сегодня -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">💳 Оплачено сегодня</h5>
+                </div>
+                <div class="card-body">
+                    {% if payments_today %}
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Время</th>
+                                    <th>Пользователь</th>
+                                    <th>Сумма</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for payment in payments_today %}
+                                <tr>
+                                    <td>{{ payment.created_at.strftime('%H:%M:%S') }}</td>
+                                    <td>
+                                        <a href="{{ url_for('user_details', user_id=payment.user.id) }}">
+                                            {{ payment.user.telegram_username or payment.user.telegram_id }}
+                                        </a>
+                                    </td>
+                                    <td>{{ payment.amount }}₽</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-3">
+                        <strong>Всего оплат:</strong> {{ payments_today|length }}
+                        <br>
+                        <strong>Общая сумма:</strong> {{ payments_today|sum(attribute='amount') }}₽
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">Сегодня оплат пока не было.</p>
+                    {% endif %}
+                </div>
+            </div>
         </div>
-        {% else %}
-        <div class="alert alert-light">Сегодня оплат пока не было.</div>
-        {% endif %}
-    </div>
 
-    <div class="col-md-6">
-        <h4><i class="bi bi-calendar-x"></i> Заканчивается сегодня</h4>
-        {% if ending_today %}
-        <div class="table-responsive">
-            <table class="table table-sm table-striped">
-                <thead>
-                    <tr>
-                        <th>ID Подписки</th>
-                        <th>Пользователь (TG ID)</th>
-                        <th>Время окончания</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for sub in ending_today %}
-                    <tr>
-                        <td>{{ sub.id }}</td>
-                        <td>
-                            {{ sub.user.telegram_username or '-' }}
-                            (<code>{{ sub.user.telegram_id }}</code>)
-                        </td>
-                        <td>{{ sub.end_date.strftime('%H:%M:%S') if sub.end_date else '-' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <!-- Заканчивающиеся подписки -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="card-title mb-0">⏳ Заканчивается сегодня</h5>
+                </div>
+                <div class="card-body">
+                    {% if ending_today %}
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Время</th>
+                                    <th>Пользователь</th>
+                                    <th>Автоплатеж</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for sub in ending_today %}
+                                <tr>
+                                    <td>{{ sub.end_date.strftime('%H:%M:%S') }}</td>
+                                    <td>
+                                        <a href="{{ url_for('user_details', user_id=sub.user.id) }}">
+                                            {{ sub.user.telegram_username or sub.user.telegram_id }}
+                                        </a>
+                                    </td>
+                                    <td>
+                                        {% if sub.auto_payment %}
+                                        <span class="badge bg-success">Включен</span>
+                                        {% else %}
+                                        <span class="badge bg-danger">Отключен</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-3">
+                        <strong>Всего подписок:</strong> {{ ending_today|length }}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">Подписок, заканчивающихся сегодня, нет.</p>
+                    {% endif %}
+                </div>
+            </div>
         </div>
-        {% else %}
-        <div class="alert alert-light">Подписок, заканчивающихся сегодня, нет.</div>
-        {% endif %}
     </div>
 </div>
-
 {% endblock %}

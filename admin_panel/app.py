@@ -132,28 +132,26 @@ def users():
                 'subscription_end': None
             }
             
-            # Получаем активную подписку
-            active_sub = db.query(Subscription).filter(
-                Subscription.user_id == user.id,
-                Subscription.end_date > now,
-                Subscription.is_active == True
-            ).order_by(Subscription.end_date.desc()).first()
+            # Получаем активную подписку с проверкой платежа
+            active_sub = (db.query(Subscription)
+                .join(Payment, Subscription.payments)
+                .filter(
+                    Subscription.user_id == user.id,
+                    Subscription.end_date > now,
+                    Subscription.is_active == True,
+                    Payment.status == PaymentStatus.COMPLETED
+                )
+                .order_by(Subscription.end_date.desc())
+                .first())
             
             if active_sub:
-                # Проверяем, есть ли успешный платеж для этой подписки
-                payment = db.query(Payment).filter(
-                    Payment.subscription_id == active_sub.id,
-                    Payment.status == PaymentStatus.COMPLETED
-                ).first()
-                
-                if payment:
-                    user_data['active_subscription'] = active_sub
-                    # Конвертируем время окончания подписки в московское
-                    end_date_utc = active_sub.end_date
-                    if end_date_utc.tzinfo is None:
-                        end_date_utc = end_date_utc.replace(tzinfo=timezone.utc)
-                    user_data['subscription_end'] = end_date_utc.astimezone(MSK)
-                    logger.debug(f"Найдена активная подписка для пользователя {user.id}: {active_sub.id}, окончание: {user_data['subscription_end']}")
+                user_data['active_subscription'] = active_sub
+                # Конвертируем время окончания подписки в московское
+                end_date_utc = active_sub.end_date
+                if end_date_utc.tzinfo is None:
+                    end_date_utc = end_date_utc.replace(tzinfo=timezone.utc)
+                user_data['subscription_end'] = end_date_utc.astimezone(MSK)
+                logger.debug(f"Найдена активная подписка для пользователя {user.id}: {active_sub.id}, окончание: {user_data['subscription_end']}")
             
             users_data.append(user_data)
 
@@ -234,25 +232,37 @@ def delete_whitelist(entry_id):
 def subscriptions():
     try:
         db = next(get_db())
-        now = datetime.now()
-        today = now.date()
+        now = datetime.now(MSK)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow = today + timedelta(days=1)
         
-        payments_today = db.query(Subscription).filter(
-            Subscription.start_date >= today,
-            Subscription.start_date < tomorrow
-        ).all()
+        # Получаем успешные платежи за сегодня
+        payments_today = (db.query(Payment)
+            .filter(
+                Payment.created_at >= today,
+                Payment.created_at < tomorrow,
+                Payment.status == PaymentStatus.COMPLETED
+            )
+            .order_by(Payment.created_at.desc())
+            .all())
         
-        # Показываем только те, у кого end_date > сейчас
-        ending_today = db.query(Subscription).filter(
-            Subscription.end_date >= now,
-            Subscription.end_date < tomorrow
-        ).all()
+        # Получаем подписки, заканчивающиеся сегодня
+        ending_today = (db.query(Subscription)
+            .join(Payment, Subscription.payments)
+            .filter(
+                Subscription.end_date >= today,
+                Subscription.end_date < tomorrow,
+                Subscription.is_active == True,
+                Payment.status == PaymentStatus.COMPLETED
+            )
+            .order_by(Subscription.end_date.desc())
+            .all())
         
         return render_template('subscriptions.html', 
                              payments_today=payments_today,
                              ending_today=ending_today)
     except Exception as e:
+        logger.exception("Ошибка при получении информации о подписках:")
         flash(f'Ошибка при получении информации о подписках: {str(e)}', 'error')
         return redirect(url_for('index'))
 
@@ -432,12 +442,16 @@ def manage_subscription(user_id):
                     return redirect(url_for('manage_subscription', user_id=user_id))
 
                 now = datetime.now(MSK)
-                # Находим текущую активную подписку
-                current_sub = db.query(Subscription).filter(
-                    Subscription.user_id == user.id,
-                    Subscription.end_date > now,
-                    Subscription.is_active == True
-                ).first()
+                # Находим текущую активную подписку с проверкой платежа
+                current_sub = (db.query(Subscription)
+                    .join(Payment, Subscription.payments)
+                    .filter(
+                        Subscription.user_id == user.id,
+                        Subscription.end_date > now,
+                        Subscription.is_active == True,
+                        Payment.status == PaymentStatus.COMPLETED
+                    )
+                    .first())
 
                 if current_sub:
                     # Продлеваем существующую подписку
@@ -468,13 +482,17 @@ def manage_subscription(user_id):
 
             return redirect(url_for('user_details', user_id=user_id))
 
-        # Получаем текущую подписку для отображения
+        # Получаем текущую подписку для отображения с проверкой платежа
         now = datetime.now(MSK)
-        current_sub = db.query(Subscription).filter(
-            Subscription.user_id == user.id,
-            Subscription.end_date > now,
-            Subscription.is_active == True
-        ).first()
+        current_sub = (db.query(Subscription)
+            .join(Payment, Subscription.payments)
+            .filter(
+                Subscription.user_id == user.id,
+                Subscription.end_date > now,
+                Subscription.is_active == True,
+                Payment.status == PaymentStatus.COMPLETED
+            )
+            .first())
 
         return render_template('manage_subscription.html',
                              user=user,

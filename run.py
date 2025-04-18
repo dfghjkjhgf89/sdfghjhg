@@ -11,8 +11,6 @@ from hypercorn.config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
 async def run_web():
     config = Config()
     config.bind = ["0.0.0.0:8000"]
