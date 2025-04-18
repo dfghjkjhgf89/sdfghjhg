@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block title %}Рассылка сообщений{% endblock %}
+
+{% block content %}
+<h2>Рассылка сообщений</h2>
+
+<form method="post" action="{{ url_for('send_broadcast') }}">
+    <div class="mb-3">
+        <label for="message_text" class="form-label">Текст сообщения:</label>
+        <textarea class="form-control" id="message_text" name="message_text" rows="5" required></textarea>
+    </div>
+
+    <div class="mb-3">
+        <label for="broadcast_type" class="form-label">Тип рассылки:</label>
+        <select class="form-select" id="broadcast_type" name="broadcast_type">
+            <option value="all">Всем пользователям</option>
+            <option value="students">Ученикам (с доступом)</option>
+            <option value="selected">Выбранному пользователю</option>
+        </select>
+    </div>
+
+    <div class="mb-3" id="user_selection" style="display: none;">
+        <label for="selected_user_id" class="form-label">Выберите пользователя:</label>
+        <select class="form-select" id="selected_user_id" name="selected_user_id">
+            {% for user in users %}
+            {% if user.telegram_id %}
+            <option value="{{ user.id }}">ID: {{ user.id }}, TG: {{ user.telegram_id }} ({{ user.email }})</option>
+            {% endif %}
+            {% endfor %}
+        </select>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Отправить рассылку</button>
+</form>
+
+<script>
+    const broadcastTypeSelect = document.getElementById('broadcast_type');
+    const userSelectionDiv = document.getElementById('user_selection');
+
+    broadcastTypeSelect.addEventListener('change', function () {
+        if (this.value === 'selected') {
+            userSelectionDiv.style.display = 'block';
+        } else {
+            userSelectionDiv.style.display = 'none';
+        }
+    });
+
+    // Initialize based on current selection
+    if (broadcastTypeSelect.value === 'selected') {
+        userSelectionDiv.style.display = 'block';
+    }
+</script>
+
+{% endblock %}

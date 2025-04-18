@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Пользователи{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>👥 Список пользователей</h2>
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="thead-dark">
+                <tr>
+                    <th>ID</th>
+                    <th>Telegram ID</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Дата регистрации</th>
+                    <th>Автоплатежи</th>
+                    <th>Подписка до</th>
+                    <th>Статус</th>
+                    <th style="min-width: 200px;">Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user_data in users_data %}
+                <tr>
+                    <td>{{ user_data.user.id }}</td>
+                    <td>
+                        <a href="#" class="copy-text" data-text="{{ user_data.user.telegram_id }}"
+                            data-bs-toggle="tooltip" title="Нажмите чтобы скопировать">
+                            {{ user_data.user.telegram_id }}
+                            <i class="fas fa-copy ml-1"></i>
+                        </a>
+                    </td>
+                    <td>{{ user_data.user.telegram_username or 'Нет' }}</td>
+                    <td>{{ user_data.user.email }}</td>
+                    <td>{{ user_data.user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        {% if user_data.autopayment_enabled %}
+                        <span class="badge badge-success">✅ Включены</span>
+                        {% else %}
+                        <span class="badge badge-danger">❌ Отключены</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user_data.subscription_end %}
+                        {{ user_data.subscription_end.strftime('%Y-%m-%d %H:%M') }}
+                        <span class="badge badge-success">Активна</span>
+                        {% else %}
+                        <span class="text-muted">Нет активной подписки</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user_data.user.is_active %}
+                        <span class="badge badge-success">Активен</span>
+                        {% else %}
+                        <span class="badge badge-danger">Заблокирован</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group">
+                            <!-- Детальная информация -->
+                            <a href="{{ url_for('user_details', user_id=user_data.user.id) }}"
+                                class="btn btn-sm btn-info" data-bs-toggle="tooltip" title="Детальная информация">
+                                <i class="fas fa-info-circle"></i>
+                            </a>
+
+                            <!-- Редактировать -->
+                            <a href="{{ url_for('edit_user', user_id=user_data.user.id) }}"
+                                class="btn btn-sm btn-primary" data-bs-toggle="tooltip"
+                                title="Редактировать пользователя">
+                                <i class="fas fa-edit"></i>
+                            </a>
+
+                            <!-- Управление подпиской -->
+                            <a href="{{ url_for('manage_subscription', user_id=user_data.user.id) }}"
+                                class="btn btn-sm btn-warning" data-bs-toggle="tooltip" title="Управление подпиской">
+                                <i class="fas fa-clock"></i>
+                            </a>
+
+                            <!-- Отправить сообщение -->
+                            <button type="button" class="btn btn-sm btn-success send-message-btn" data-bs-toggle="modal"
+                                data-bs-target="#messageModal" data-user-id="{{ user_data.user.id }}"
+                                data-username="{{ user_data.user.telegram_username }}" title="Отправить сообщение">
+                                <i class="fas fa-envelope"></i>
+                            </button>
+
+                            <!-- Блокировка/Разблокировка -->
+                            <form action="{{ url_for('toggle_user_active', user_id=user_data.user.id) }}" method="POST"
+                                class="d-inline">
+                                <button type="submit"
+                                    class="btn btn-sm {% if user_data.user.is_active %}btn-danger{% else %}btn-success{% endif %}"
+                                    data-bs-toggle="tooltip"
+                                    title="{% if user_data.user.is_active %}Заблокировать{% else %}Разблокировать{% endif %}">
+                                    {% if user_data.user.is_active %}
+                                    <i class="fas fa-ban"></i>
+                                    {% else %}
+                                    <i class="fas fa-check"></i>
+                                    {% endif %}
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Модальное окно для отправки сообщения -->
+<div class="modal fade" id="messageModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Отправить сообщение</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{{ url_for('send_user_message') }}" method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="user_id" id="messageUserId">
+                    <div class="mb-3">
+                        <label for="messageText" class="form-label">Сообщение для <span
+                                id="messageUsername"></span></label>
+                        <textarea class="form-control" id="messageText" name="message" rows="3" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Отправить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}
+<script>
+    // Инициализация тултипов
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+
+    // Копирование Telegram ID
+    document.querySelectorAll('.copy-text').forEach(element => {
+        element.addEventListener('click', function (e) {
+            e.preventDefault();
+            const text = this.dataset.text;
+            navigator.clipboard.writeText(text).then(() => {
+                const icon = this.querySelector('i');
+                icon.classList.remove('fa-copy');
+                icon.classList.add('fa-check');
+                setTimeout(() => {
+                    icon.classList.remove('fa-check');
+                    icon.classList.add('fa-copy');
+                }, 2000);
+            });
+        });
+    });
+
+    // Обработка модального окна отправки сообщения
+    document.querySelectorAll('.send-message-btn').forEach(button => {
+        button.addEventListener('click', function () {
+            const userId = this.dataset.userId;
+            const username = this.dataset.username;
+            document.getElementById('messageUserId').value = userId;
+            document.getElementById('messageUsername').textContent = username || 'пользователя';
+        });
+    });
+</script>
+{% endblock %}
+
+{% endblock %}

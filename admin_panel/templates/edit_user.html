@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+
+{% block title %}Редактировать пользователя {{ user.telegram_id or user.id }}{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-pencil-square"></i> Редактировать пользователя ID: {{ user.id }} (TG: {{ user.telegram_id or 'нет'
+    }})</h2>
+<p>Email: {{ user.email or 'не указан' }}</p>
+
+<form method="post" action="{{ url_for('edit_user', user_id=user.id) }}">
+    <div class="mb-3">
+        <label for="referral_link_override" class="form-label">Реферальная ссылка (переопределение)</label>
+        <input type="text" class="form-control" id="referral_link_override" name="referral_link"
+            value="{{ user.referral_link_override or '' }}" placeholder="Оставьте пустым для стандартной ссылки">
+        <div class="form-text">
+            Если оставить поле пустым, будет использоваться стандартная ссылка вида https://t.me/YourBotName?start={{
+            user.telegram_id }}
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Статус реферальной ссылки (переопределение)</label>
+        <div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="referral_status" id="status_true" value="true" {% if
+                    user.referral_status_override is sameas true %}checked{% endif %}>
+                <label class="form-check-label" for="status_true">
+                    <span class="badge bg-success">✅ Активна</span>
+                </label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="referral_status" id="status_false" value="false" {%
+                    if user.referral_status_override is sameas false %}checked{% endif %}>
+                <label class="form-check-label" for="status_false">
+                    <span class="badge bg-danger">❌ Не активна</span>
+                </label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="referral_status" id="status_none" value="none" {% if
+                    user.referral_status_override is none %}checked{% endif %}>
+                <label class="form-check-label" for="status_none">
+                    <span class="badge bg-secondary">Не задан (по умолчанию)</span>
+                </label>
+            </div>
+        </div>
+        <div class="form-text">
+            Если выбрано "Не задан", будет использоваться статус по умолчанию из конфигурации бота.
+        </div>
+    </div>
+
+    <div class="mb-3 form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="is_active" name="is_active" value="true" {% if
+            user.is_active %}checked{% endif %}>
+        <label class="form-check-label" for="is_active">Пользователь активен</label>
+    </div>
+
+    <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Сохранить изменения</button>
+    <a href="{{ url_for('users') }}" class="btn btn-secondary">Отмена</a>
+</form>
+
+{% endblock %}

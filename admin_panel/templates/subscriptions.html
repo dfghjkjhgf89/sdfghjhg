@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+
+{% block title %}Отчет по подпискам{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-calendar-check"></i> Отчет по подпискам (за сегодня)</h2>
+
+<div class="row">
+    <div class="col-md-6">
+        <h4><i class="bi bi-currency-ruble"></i> Оплачено сегодня</h4>
+        {% if paid_today %}
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>ID Подписки</th>
+                        <th>Пользователь (TG ID)</th>
+                        <th>Время оплаты</th>
+                        <th>Сумма</th>
+                        <th>ID Платежа</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sub in paid_today %}
+                    <tr>
+                        <td>{{ sub.id }}</td>
+                        <td>
+                            {{ sub.user.telegram_username or '-' }}
+                            (<code>{{ sub.user.telegram_id }}</code>)
+                        </td>
+                        <td>{{ sub.start_date.strftime('%H:%M:%S') if sub.start_date else '-' }}</td>
+                        <td>{{ sub.payment_amount or '-' }} ₽</td>
+                        <td><code>{{ sub.payment_id or '-' }}</code></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-light">Сегодня оплат пока не было.</div>
+        {% endif %}
+    </div>
+
+    <div class="col-md-6">
+        <h4><i class="bi bi-calendar-x"></i> Заканчивается сегодня</h4>
+        {% if ending_today %}
+        <div class="table-responsive">
+            <table class="table table-sm table-striped">
+                <thead>
+                    <tr>
+                        <th>ID Подписки</th>
+                        <th>Пользователь (TG ID)</th>
+                        <th>Время окончания</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sub in ending_today %}
+                    <tr>
+                        <td>{{ sub.id }}</td>
+                        <td>
+                            {{ sub.user.telegram_username or '-' }}
+                            (<code>{{ sub.user.telegram_id }}</code>)
+                        </td>
+                        <td>{{ sub.end_date.strftime('%H:%M:%S') if sub.end_date else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-light">Подписок, заканчивающихся сегодня, нет.</div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}

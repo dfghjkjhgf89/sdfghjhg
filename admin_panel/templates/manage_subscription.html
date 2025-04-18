@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Управление подпиской{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2>⚙️ Управление подпиской</h2>
+                <div>
+                    <a href="{{ url_for('user_details', user_id=user.id) }}" class="btn btn-secondary me-2">
+                        <i class="fas fa-user"></i> К профилю пользователя
+                    </a>
+                    <a href="{{ url_for('users') }}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left"></i> К списку пользователей
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Информация о пользователе -->
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-user"></i> Информация о пользователе
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless">
+                        <tr>
+                            <th>ID:</th>
+                            <td>{{ user.id }}</td>
+                        </tr>
+                        <tr>
+                            <th>Username:</th>
+                            <td>{{ user.telegram_username or 'Не указан' }}</td>
+                        </tr>
+                        <tr>
+                            <th>Telegram ID:</th>
+                            <td>{{ user.telegram_id }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Текущая подписка -->
+        <div class="col-md-8 mb-4">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-clock"></i> Текущая подписка
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if current_subscription %}
+                    <div class="alert alert-info">
+                        <strong>Активная подписка:</strong><br>
+                        Начало: {{ current_subscription.start_date.strftime('%Y-%m-%d %H:%M:%S') }}<br>
+                        Окончание: {{ current_subscription.end_date.strftime('%Y-%m-%d %H:%M:%S') }}<br>
+                        Автоплатеж: {{ "Включен" if current_subscription.auto_payment else "Отключен" }}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        У пользователя нет активной подписки
+                    </div>
+                    {% endif %}
+
+                    <!-- Форма управления подпиской -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-success text-white">
+                                    <h6 class="card-title mb-0">Продлить подписку</h6>
+                                </div>
+                                <div class="card-body">
+                                    <form action="{{ url_for('manage_subscription', user_id=user.id) }}" method="POST">
+                                        <input type="hidden" name="action" value="extend">
+                                        <button type="submit" class="btn btn-success">
+                                            Продлить подписку на 10 минут
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+                        {% if current_subscription %}
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-danger text-white">
+                                    <h6 class="card-title mb-0">Отменить подписку</h6>
+                                </div>
+                                <div class="card-body">
+                                    <form action="{{ url_for('manage_subscription', user_id=user.id) }}" method="POST">
+                                        <input type="hidden" name="action" value="cancel">
+                                        <button type="submit" class="btn btn-danger w-100"
+                                            onclick="return confirm('Вы уверены, что хотите отменить подписку?')">
+                                            <i class="fas fa-times"></i> Отменить
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

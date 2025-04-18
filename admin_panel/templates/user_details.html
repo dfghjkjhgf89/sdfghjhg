@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block title %}Информация о пользователе{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2>👤 Информация о пользователе</h2>
+                <a href="{{ url_for('users') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Назад к списку
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Основная информация -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-user"></i> Основная информация
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless">
+                        <tr>
+                            <th>ID:</th>
+                            <td>{{ user.id }}</td>
+                        </tr>
+                        <tr>
+                            <th>Telegram ID:</th>
+                            <td>
+                                <span class="copy-text" data-clipboard-text="{{ user.telegram_id }}">
+                                    {{ user.telegram_id }}
+                                    <i class="fas fa-copy ml-1"></i>
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Username:</th>
+                            <td>{{ user.telegram_username or 'Не указан' }}</td>
+                        </tr>
+                        <tr>
+                            <th>Email:</th>
+                            <td>{{ user.email or 'Не указан' }}</td>
+                        </tr>
+                        <tr>
+                            <th>Дата регистрации:</th>
+                            <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        </tr>
+                        <tr>
+                            <th>Статус:</th>
+                            <td>
+                                {% if user.is_active %}
+                                <span class="badge badge-success">Активен</span>
+                                {% else %}
+                                <span class="badge badge-danger">Заблокирован</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Автоплатежи:</th>
+                            <td>
+                                {% if autopayment_enabled %}
+                                <span class="badge badge-success">Включены</span>
+                                {% else %}
+                                <span class="badge badge-danger">Отключены</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Информация о подписке -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-clock"></i> Текущая подписка
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if active_subscription %}
+                    <table class="table table-borderless">
+                        <tr>
+                            <th>Начало:</th>
+                            <td>{{ active_subscription.start_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                        </tr>
+                        <tr>
+                            <th>Окончание:</th>
+                            <td>{{ active_subscription.end_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                        </tr>
+                        <tr>
+                            <th>Статус:</th>
+                            <td>
+                                <span class="badge badge-success">Активна</span>
+                            </td>
+                        </tr>
+                    </table>
+                    {% else %}
+                    <p class="text-muted mb-0">Нет активной подписки</p>
+                    {% endif %}
+                    <div class="mt-3">
+                        <a href="{{ url_for('manage_subscription', user_id=user.id) }}" class="btn btn-primary">
+                            <i class="fas fa-cog"></i> Управление подпиской
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- История подписок -->
+        <div class="col-md-8 mb-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-history"></i> История подписок
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if subscription_history %}
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Начало</th>
+                                    <th>Окончание</th>
+                                    <th>Сумма</th>
+                                    <th>Статус</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for sub in subscription_history %}
+                                <tr>
+                                    <td>{{ sub.start_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td>{{ sub.end_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td>{{ sub.payment_amount }}₽</td>
+                                    <td>
+                                        {% if sub == active_subscription %}
+                                        <span class="badge badge-success">Активна</span>
+                                        {% else %}
+                                        <span class="badge badge-secondary">Завершена</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">История подписок пуста</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Рефералы -->
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-users"></i> Рефералы
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if referrals %}
+                    <div class="list-group">
+                        {% for referral in referrals %}
+                        <a href="{{ url_for('user_details', user_id=referral.id) }}"
+                            class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                            {{ referral.telegram_username or referral.telegram_id }}
+                            <span class="badge bg-primary rounded-pill">
+                                {{ referral.created_at.strftime('%Y-%m-%d') }}
+                            </span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">Нет рефералов</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-envelope"></i> Отправить сообщение
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('send_user_message') }}" method="post">
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <div class="mb-3">
+                            <textarea class="form-control" name="message" rows="3" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Отправить</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}
+<script>
+    // Копирование Telegram ID
+    document.querySelectorAll('.copy-text').forEach(element => {
+        element.style.cursor = 'pointer';
+        element.addEventListener('click', function () {
+            const text = this.getAttribute('data-clipboard-text');
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Скопировано в буфер обмена!');
+            });
+        });
+    });
+</script>
+{% endblock %}
+
+{% endblock %}
