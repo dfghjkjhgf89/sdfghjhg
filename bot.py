@@ -6,8 +6,10 @@ from functools import wraps
 import aiohttp
 import uuid
 import hashlib
+from typing import Union
 import json
 from sqlalchemy import and_
+import pytz
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -48,6 +50,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
 SUBSCRIPTION_DURATION = datetime.timedelta(minutes=10)  # Тестовая длительность - 10 минут
+MSK = pytz.timezone('Europe/Moscow')
 
 class RegistrationStates(StatesGroup):
     waiting_for_email = State()
@@ -308,8 +311,9 @@ async def handle_my_account(message: types.Message, *, user: User):
                                    .order_by(Subscription.end_date.desc())
                                    .first())
             if active_subscription:
-                end_date_str = active_subscription.end_date.strftime("%d.%m.%Y %H:%M")
-                access_status_text = f"✅ Доступ к курсу есть (до {end_date_str} UTC)"
+                end_date_msk = active_subscription.end_date.astimezone(MSK)
+                end_date_str = end_date_msk.strftime("%d.%m.%Y %H:%M МСК")
+                access_status_text = f"✅ Доступ к курсу есть (до {end_date_str})"
 
     account_info = (
         f"👤 Ваш аккаунт:\n"
@@ -325,7 +329,7 @@ async def handle_my_account(message: types.Message, *, user: User):
 async def handle_referral_link(message: types.Message, *, user: User):
     logger.info(f"User {user.telegram_id} requested referral link.")
     
-    start_param = user.referral_link_override if user.referral_link_override else user.telegram_id
+    start_param = user.telegram_id
     
     ref_link = f"https://t.me/{BOT_USERNAME}?start={start_param}"
     
@@ -369,14 +373,10 @@ async def handle_resume_command(message: types.Message, *, user: User):
 @check_access
 async def handle_referral_status(message: types.Message, *, user: User):
     logger.info(f"User {user.telegram_id} requested referral status.")
-    # По умолчанию неактивна, если админ не включил override
-    status_flag = user.referral_status_override
-    if status_flag is None:
-        status_flag = False  # по умолчанию неактивна
-
+    # По умолчанию неактивна
+    status_flag = False  # по умолчанию неактивна
     status_icon = "✅" if status_flag else "❌"
     status_text = "Активна" if status_flag else "Не активна"
-
     await message.answer(f"📊 Статус вашей реферальной ссылки: {status_icon} ({status_text})")
 
 @dp.message(F.text == "⏳ Моя подписка")
@@ -402,7 +402,8 @@ async def handle_my_subscription(message: types.Message, *, user: User):
         is_whitelisted = db.query(Whitelist).filter(Whitelist.telegram_id == user.telegram_id).first() is not None
         
         if active_subscription:
-            end_date_str = active_subscription.end_date.strftime("%d.%m.%Y %H:%M UTC")
+            end_date_msk = active_subscription.end_date.astimezone(MSK)
+            end_date_str = end_date_msk.strftime("%d.%m.%Y %H:%M МСК")
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="buy_access")]
@@ -567,12 +568,19 @@ async def handle_check_payment(callback: types.CallbackQuery, *, user: User):
                 sub.rebill_id = payment_info.get("RebillId")
                 sub.last_payment_date = now
                 sub.next_payment_date = now + SUBSCRIPTION_DURATION
-                sub.payment_amount = payment_info.get("Amount", 1500) / 100
+                try:
+                    amount_from_payment = payment_info.get("Amount")
+                    if amount_from_payment is not None:
+                        sub.payment_amount = float(amount_from_payment) / 100
+                    else:
+                        logger.warning(f"payment_info['Amount'] is None, оставляем прежнее значение: {sub.payment_amount}")
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке суммы платежа: {e}")
                 sub.failed_payments = 0
-                
+                sub.notification_sent = False
+                logger.info(f"Subscription fields after update: is_active={sub.is_active}, end_date={sub.end_date}, auto_renewal={sub.auto_renewal}, rebill_id={sub.rebill_id}, last_payment_date={sub.last_payment_date}, next_payment_date={sub.next_payment_date}, payment_amount={sub.payment_amount}, failed_payments={sub.failed_payments}, notification_sent={sub.notification_sent}")
                 payment.status = PaymentStatus.COMPLETED
                 payment.completed_at = now
-                
                 db.commit()
                 logger.info(f"Subscription {sub.id} updated successfully. End date: {sub.end_date}")
 
@@ -593,40 +601,33 @@ async def handle_check_payment(callback: types.CallbackQuery, *, user: User):
                     "📱 Ссылка на канал уже доступна по кнопке ниже:",
                     reply_markup=keyboard
                 )
-    elif status == "REJECTED" or status == "DEADLINE_EXPIRED" or status == "CANCELED":
-        # Платеж отклонен или отменен
-        error_message = payment_info.get("Message", "Неизвестная ошибка")
-        await callback.message.edit_text(
-            f"❌ Оплата не прошла\n\n"
-            f"Причина: {error_message}\n\n"
-            "Вы можете попробовать оплатить снова:",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="💳 Попробовать снова", callback_data="process_payment")],
-                    [InlineKeyboardButton(text="« Назад", callback_data="back")]
-                ]
-            )
-        )
-    elif status == "NEW" or status == "AUTHORIZED" or status == "PENDING":
-        # Платеж в процессе
-        await callback.answer(
-            "⏳ Платеж обрабатывается, пожалуйста, подождите...\n"
-            "Нажмите кнопку проверки через 30 секунд.",
-            show_alert=True
-        )
     else:
-        # Неизвестный статус
+        # Оплата не получена
+        error_message = payment_info.get("Message")
+        status_text = {
+            "REJECTED": "Платёж отклонён.",
+            "DEADLINE_EXPIRED": "Время оплаты истекло.",
+            "CANCELED": "Платёж отменён.",
+            "NEW": "Платёж ещё не совершен.",
+            "AUTHORIZED": "Платёж авторизован, но не подтверждён.",
+            "PENDING": "Платёж в обработке.",
+        }.get(status, "Платёж не получен.")
+        reason = f"\nПричина: {error_message}" if error_message else ""
         await callback.message.edit_text(
-            "❓ Неизвестный статус платежа\n\n"
-            "Пожалуйста, попробуйте оплатить снова или обратитесь в поддержку:",
+            f"❌ Оплата не получена. {status_text}{reason}\n\n"
+            "Если вы уже оплатили — попробуйте нажать 'Проверить оплату' через 30 секунд.\n"
+            "Если не оплачивали — оплатите по кнопке ниже.\n\n"
+            "Если возникли вопросы — обратитесь в поддержку.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="💳 Попробовать снова", callback_data="process_payment")],
+                    [InlineKeyboardButton(text="💳 Оплатить", callback_data="process_payment")],
+                    [InlineKeyboardButton(text="Проверить оплату", callback_data=f"check_payment_{payment_id}")],
                     [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")],
                     [InlineKeyboardButton(text="« Назад", callback_data="back")]
                 ]
             )
         )
+        await callback.answer()
 
 # Добавляем обработчик для отключения автоплатежа
 @dp.callback_query(F.data == "disable_autopayment")
@@ -647,7 +648,7 @@ async def handle_disable_autopayment(callback: types.CallbackQuery, *, user: Use
                 "Текущая подписка будет действовать до окончания оплаченного периода.",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[[
-                        InlineKeyboardButton(text="🔄 Включить автоплатеж", callback_data="enable_autopayment")
+                        InlineKeyboardButton(text="✅ Включить автоплатеж", callback_data="enable_autopayment")
                     ]]
                 )
             )

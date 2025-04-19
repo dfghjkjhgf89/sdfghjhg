@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import asyncio
 from config import DATABASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD, BOT_TOKEN, TBANK_SECRET_KEY, ADMIN_TG_ACCOUNT
-from models import User, Subscription, Whitelist, SessionLocal, init_db, Referral, Admin, StopCommand, Payment, PaymentStatus
+from models import User, Subscription, Whitelist, SessionLocal, init_db, Referral, Admin, StopCommand, Payment, PaymentStatus, TariffPlan, PaymentMethod
 from aiogram import Bot
 from flask_sqlalchemy import SQLAlchemy
 
@@ -433,15 +433,29 @@ def manage_subscription(user_id):
             flash('Пользователь не найден', 'error')
             return redirect(url_for('users'))
 
+        tariffs = db.query(TariffPlan).filter_by(is_active=True).all()
+
         if request.method == 'POST':
             action = request.form.get('action')
             if action == 'extend':
                 days = int(request.form.get('days', 0))
-                if days <= 0:
+                now = datetime.now(MSK)
+                if days < 0:
                     flash('Количество дней должно быть положительным числом', 'error')
                     return redirect(url_for('manage_subscription', user_id=user_id))
-
-                now = datetime.now(MSK)
+                # Если days == 0, продлеваем на 10 минут (тестовый режим)
+                if days == 0:
+                    duration = SUBSCRIPTION_DURATION
+                    duration_str = '10 минут'
+                else:
+                    duration = timedelta(days=days)
+                    duration_str = f'{days} дн.'
+                # Получаем выбранный тариф
+                tariff_id = int(request.form.get('tariff_id'))
+                selected_tariff = db.query(TariffPlan).filter_by(id=tariff_id).first()
+                if not selected_tariff:
+                    flash('Выбранный тариф не найден', 'error')
+                    return redirect(url_for('manage_subscription', user_id=user_id))
                 # Находим текущую активную подписку с проверкой платежа
                 current_sub = (db.query(Subscription)
                     .join(Payment, Subscription.payments)
@@ -452,22 +466,33 @@ def manage_subscription(user_id):
                         Payment.status == PaymentStatus.COMPLETED
                     )
                     .first())
-
                 if current_sub:
                     # Продлеваем существующую подписку
-                    current_sub.end_date = now + SUBSCRIPTION_DURATION
+                    current_sub.end_date = now + duration
+                    current_sub.tariff_id = selected_tariff.id
                 else:
                     # Создаем новую подписку
                     new_sub = Subscription(
                         user_id=user.id,
+                        tariff_id=selected_tariff.id,
                         start_date=now,
-                        end_date=now + SUBSCRIPTION_DURATION,
+                        end_date=now + duration,
                         is_active=True
                     )
                     db.add(new_sub)
-
+                    db.flush()  # Получаем id подписки
+                    # Создаём платёж со статусом COMPLETED
+                    new_payment = Payment(
+                        user_id=user.id,
+                        subscription_id=new_sub.id,
+                        amount=selected_tariff.price,
+                        currency='RUB',
+                        status=PaymentStatus.COMPLETED,
+                        payment_method=PaymentMethod.CARD
+                    )
+                    db.add(new_payment)
                 db.commit()
-                flash(f'Подписка успешно продлена на 10 минут', 'success')
+                flash(f'Подписка успешно выдана/продлена на {duration_str}', 'success')
 
             elif action == 'cancel':
                 # Отменяем все активные подписки
@@ -497,7 +522,8 @@ def manage_subscription(user_id):
         return render_template('manage_subscription.html',
                              user=user,
                              current_subscription=current_sub,
-                             subscription_duration="10 минут")
+                             subscription_duration="10 минут",
+                             tariffs=tariffs)
     except Exception as e:
         logger.exception(f"Ошибка при управлении подпиской пользователя {user_id}:")
         flash(f'Ошибка: {str(e)}', 'error')

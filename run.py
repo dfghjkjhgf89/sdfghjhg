@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import sys
-import msvcrt
 import atexit
 from bot import main as bot_main
 from admin_panel.app import app
@@ -10,7 +9,7 @@ from hypercorn.asyncio import serve
 from hypercorn.config import Config
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) 
 async def run_web():
     config = Config()
     config.bind = ["0.0.0.0:8000"]

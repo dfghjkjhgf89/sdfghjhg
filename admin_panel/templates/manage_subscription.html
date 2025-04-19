@@ -80,8 +80,17 @@
                                 <div class="card-body">
                                     <form action="{{ url_for('manage_subscription', user_id=user.id) }}" method="POST">
                                         <input type="hidden" name="action" value="extend">
+                                        <div class="mb-2">
+                                            <label for="tariff_id" class="form-label">Тариф</label>
+                                            <select name="tariff_id" id="tariff_id" class="form-select">
+                                                {% for tariff in tariffs %}
+                                                <option value="{{ tariff.id }}">{{ tariff.name }} ({{ tariff.price }}₽,
+                                                    {{ tariff.duration_days }} дн.)</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
                                         <button type="submit" class="btn btn-success">
-                                            Продлить подписку на 10 минут
+                                            Выдать/Продлить подписку на 10 минут
                                         </button>
                                     </form>
                                 </div>
